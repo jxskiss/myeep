@@ -1,0 +1,13 @@
+- name: upstream_abc_example
+  directives:
+    - "hash $host$request_uri"
+  endpoints:
+    - "127.0.0.1:6001"
+    - "127.0.0.1:6002"
+
+- name: upstream_def_example
+  directives:
+    - "hash $host$request_uri;"
+  endpoints:
+    - "127.0.0.1:6003"
+    - "127.0.0.1:6004"
