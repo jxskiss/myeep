@@ -56,8 +56,8 @@ github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
 github.com/grpc-ecosystem/grpc-gateway v1.16.0/go.mod h1:BDjrQk3hbvj6Nolgz8mAMFbcEtjT1g+wF4CSlocrBnw=
 github.com/jxskiss/errors v0.14.0 h1:SoA+ms2/gX7dZIPPbR8K2RHRsX7VCpeZDRjbLTvksUc=
 github.com/jxskiss/errors v0.14.0/go.mod h1:QN3DjRFPo9WVvmtruRTMWlK7P96AKc5zyzdoo57u3Ts=
-github.com/jxskiss/gopkg v0.11.0 h1:z26QKoHYBOve24m0d2Kz1tV+0xDS48lbd4iwjtSP2w4=
-github.com/jxskiss/gopkg v0.11.0/go.mod h1:LGlZ3hb54Aff6pHy0Rodn9I8Tl8A4YMU2gRue0f625U=
+github.com/jxskiss/gopkg v0.12.0 h1:VWYGbGGCvbqykv9JTQ/eNT+WwJpO7l3+0UK0Z+cZ+ws=
+github.com/jxskiss/gopkg v0.12.0/go.mod h1:LGlZ3hb54Aff6pHy0Rodn9I8Tl8A4YMU2gRue0f625U=
 github.com/kr/pretty v0.1.0 h1:L/CwN0zerZDmRFUapSPitk6f+Q3+0za1rQkzVuMiMFI=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=

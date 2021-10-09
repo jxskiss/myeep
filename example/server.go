@@ -14,7 +14,8 @@ var argPorts = flag.String("p", "", "ports to listen")
 
 func main() {
 	flag.Parse()
-	zlog.ReplaceGlobals(zlog.MustNewLogger(&zlog.Config{Development: true}))
+	zlog.SetupGlobals(&zlog.Config{Development: true}, true)
+	defer zlog.Sync()
 
 	portList, _ := easy.ParseInt64s(*argPorts, ",", true)
 	if len(portList) == 0 {

@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	zlog.ReplaceGlobals(zlog.MustNewLogger(&zlog.Config{Development: true}))
+	zlog.SetupGlobals(&zlog.Config{Development: true}, true)
 	defer zlog.Sync()
 
 	app := cli.NewApp()
