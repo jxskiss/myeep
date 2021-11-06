@@ -12,7 +12,12 @@ import (
 )
 
 func main() {
-	zlog.SetupGlobals(&zlog.Config{Development: true}, true)
+	zlog.SetupGlobals(&zlog.Config{
+		Development: true,
+		GlobalConfig: zlog.GlobalConfig{
+			RedirectStdLog: true,
+		},
+	})
 	defer zlog.Sync()
 
 	app := cli.NewApp()

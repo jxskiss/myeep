@@ -6,7 +6,7 @@ require (
 	github.com/envoyproxy/go-control-plane v0.9.10-0.20211003024919-aa41abea9ba8
 	github.com/golang/protobuf v1.4.3
 	github.com/jxskiss/errors v0.14.0
-	github.com/jxskiss/gopkg v0.12.0
+	github.com/jxskiss/gopkg v0.13.0
 	github.com/spf13/cast v1.4.1
 	github.com/urfave/cli/v2 v2.3.0
 	google.golang.org/grpc v1.41.0
@@ -20,7 +20,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/envoyproxy/protoc-gen-validate v0.1.0 // indirect
-	github.com/goccy/go-json v0.7.9 // indirect
+	github.com/goccy/go-json v0.7.10 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
