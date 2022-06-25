@@ -3,8 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/jxskiss/gopkg/exp/zlog"
-	"github.com/urfave/cli/v2"
+	"github.com/jxskiss/gopkg/v2/easy"
+	"github.com/jxskiss/gopkg/v2/zlog"
+	"github.com/jxskiss/mcli"
 
 	"github.com/jxskiss/myxdsdemo/envoy"
 	"github.com/jxskiss/myxdsdemo/myxds"
@@ -12,79 +13,84 @@ import (
 )
 
 func main() {
-	zlog.SetupGlobals(&zlog.Config{
-		Development: true,
-		GlobalConfig: zlog.GlobalConfig{
-			RedirectStdLog: true,
-		},
-	})
+	zlog.SetDevelopment()
 	defer zlog.Sync()
 
-	app := cli.NewApp()
-	app.Name = "myxdsdemo"
-	app.HelpName = "myxdsdemo"
-	app.Usage = "My Envoy xds demo application"
-
-	app.Commands = []*cli.Command{
-		envoyCommand(),
-		xdsCommand(),
-	}
-
-	err := app.Run(os.Args)
-	if err != nil {
-		zlog.Fatal(err.Error())
-	}
-}
-
-func envoyCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "envoy",
-		Usage:  "Run a envoy server",
-		Action: envoyAction,
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "log-level", Aliases: []string{"l"}, Usage: "set envoy log-level"},
-		},
-	}
+	app := mcli.NewApp()
+	app.Add("envoy", runEnvoy, "Run envoy server")
+	app.Add("envoy dump", dumpEnvoyConfig, "Dump envoy configuration")
+	app.Add("envoy tools", runEnvoyTools, "Run envoy config tools")
+	app.Add("xds", runXdsServer, "Run xDS server")
+	app.Run()
 }
 
 // TODO: envoy hot-restart
 //       https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/hot_restart
 //       https://www.envoyproxy.io/docs/envoy/latest/operations/hot_restarter
 
-func envoyAction(ctx *cli.Context) error {
+func runEnvoy(ctx *mcli.Context) {
+	var args struct {
+		LogLevel string `cli:"-l, --log-level, set envoy log-level"`
+	}
+	ctx.Parse(&args)
+
 	cfg, err := envoy.ReadConfig("./conf/envoy.yaml")
 	if err != nil {
-		return err
+		zlog.Fatalf("failed read config: %v", err)
 	}
-	if level := ctx.String("log-level"); level != "" {
-		cfg.LogLevel = level
+	if args.LogLevel != "" {
+		cfg.LogLevel = args.LogLevel
 	}
 	exit, err := envoy.Run(cfg)
 	if err != nil {
-		return err
+		zlog.Fatalf("failed run envoy: %v", err)
 	}
 	<-exit
-	return nil
 }
 
-func xdsCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "xds",
-		Usage:  "Run the xds server",
-		Action: xdsAction,
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "config-dir", Value: "./example/xdsconfig", Usage: "set xds config directory"},
-			&cli.StringFlag{Name: "listen", Value: "127.0.0.1:8941", Usage: "set xds listen address"},
-		},
+func dumpEnvoyConfig(ctx *mcli.Context) {
+	var args struct {
+		IncludeEDS bool `cli:"--eds, Dump endpoints discovered from EDS"`
 	}
-}
+	ctx.Parse(&args)
 
-func xdsAction(ctx *cli.Context) error {
-	prov := provider.NewFileProvider(ctx.String("config-dir"))
-	exit, err := myxds.Run(prov, ctx.String("listen"))
+	url := "http://127.0.0.1:9000/config_dump"
+	params := map[string]interface{}{}
+	if args.IncludeEDS {
+		params["include_eds"] = true
+	}
+	_, resp, _, err := easy.DoRequest(&easy.Request{
+		URL:            url,
+		Params:         params,
+		RaiseForStatus: true,
+	})
 	if err != nil {
-		return err
+		zlog.Fatalf("failed query config_dump")
+	}
+	outFile := "./conf/generated/envoy-config-dump.json"
+	err = os.WriteFile(outFile, resp, 0644)
+	if err != nil {
+		zlog.Fatalf("failed write dumped config: %v", err)
+	}
+}
+
+func runEnvoyTools(ctx *mcli.Context) {
+	// TODO
+	// See https://github.com/vorishirne/envoyconf-tools?ref=golangexample.com
+	panic("not implemented")
+}
+
+func runXdsServer(ctx *mcli.Context) {
+	var args struct {
+		ConfigDir string `cli:"--config-dir, set xds config directory" default:"./example/xdsconfig"`
+		Listen    string `cli:"--listen, set xds listen address" default:"127.0.0.1:8941"`
+	}
+	ctx.Parse(&args)
+
+	prov := provider.NewFileProvider(args.ConfigDir)
+	exit, err := myxds.Run(prov, args.Listen)
+	if err != nil {
+		zlog.Fatalf("failed run xds sever: %v", err)
 	}
 	<-exit
-	return nil
 }

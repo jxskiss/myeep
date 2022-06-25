@@ -1,10 +1,4 @@
-package model
-
-type StaticUpstream struct {
-	Name       string      `json:"name" yaml:"name"`
-	Directives []Directive `json:"directives" yaml:"directives"`
-	Endpoints  []string    `json:"endpoints" yaml:"endpoints"`
-}
+package api
 
 type Endpoint struct {
 	Addr     string            `json:"addr" yaml:"addr"`

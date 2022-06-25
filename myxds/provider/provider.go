@@ -3,15 +3,14 @@ package provider
 import (
 	"context"
 
-	"github.com/jxskiss/myxdsdemo/pkg/model"
+	"github.com/jxskiss/myxdsdemo/pkg/api"
 )
 
 type Provider interface {
-	ListDomainGroups(ctx context.Context) ([]*model.DomainGroup, error)
-	ListServiceGroups(ctx context.Context) ([]*model.ServiceGroup, error)
-	ListStaticUpstreams(ctx context.Context) ([]*model.StaticUpstream, error)
-	DiscoverEndpoints(ctx context.Context, serviceName string) ([]*model.Endpoint, error)
-
+	ListDomainGroups(ctx context.Context) ([]*api.DomainGroup, error)
+	ListServices(ctx context.Context) ([]*api.Service, error)
 	WatchConfig(ctx context.Context) <-chan struct{}
+
+	DiscoverEndpoints(ctx context.Context, cluster string) ([]*api.Endpoint, error)
 	WatchEndpoints(ctx context.Context) <-chan struct{}
 }

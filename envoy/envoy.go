@@ -6,9 +6,9 @@ import (
 	"os/exec"
 
 	"github.com/jxskiss/errors"
-	"github.com/jxskiss/gopkg/easy"
-	"github.com/jxskiss/gopkg/exp/confr"
-	"github.com/jxskiss/gopkg/exp/zlog"
+	"github.com/jxskiss/gopkg/v2/confr"
+	"github.com/jxskiss/gopkg/v2/easy"
+	"github.com/jxskiss/gopkg/v2/zlog"
 )
 
 type Configuration struct {

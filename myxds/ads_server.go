@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sort"
 	"time"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -12,6 +11,7 @@ import (
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	clusterservice "github.com/envoyproxy/go-control-plane/envoy/service/cluster/v3"
 	discoverygrpc "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
@@ -26,24 +26,26 @@ import (
 	resource "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	envoyserver "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
-
-	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/jxskiss/errors"
-	"github.com/jxskiss/gopkg/easy"
-	"github.com/jxskiss/gopkg/exp/zlog"
+	"github.com/jxskiss/gopkg/v2/easy"
+	"github.com/jxskiss/gopkg/v2/json"
+	"github.com/jxskiss/gopkg/v2/set"
+	"github.com/jxskiss/gopkg/v2/zlog"
 	"github.com/spf13/cast"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/jxskiss/myxdsdemo/myxds/provider"
-	"github.com/jxskiss/myxdsdemo/pkg/model"
+	"github.com/jxskiss/myxdsdemo/pkg/api"
 )
 
 const grpcMaxConcurrentStreams = 100000
 
 type ConfigState struct {
-	DomainGroups    []*model.DomainGroup
-	ServiceGroups   []*model.ServiceGroup
-	StaticUpstreams []*model.StaticUpstream
+	DomainGroups []*api.DomainGroup
+	Services     []*api.Service
 }
 
 type clusterNameHash struct{}
@@ -76,13 +78,16 @@ func (p *Manager) Watch() error {
 	if err != nil {
 		return err
 	}
+
+	easy.PanicOnError(json.Dump("./conf/generated/state_dump.json", state, "", "  "))
+
 	snap, err := p.createSnapshot(ctx, state)
 	if err != nil {
 		return err
 	}
 
 	clusterName := "infra.l7lb.myxds_demo_envoy" // FIXME
-	err = p.cache.SetSnapshot(ctx, clusterName, *snap)
+	err = p.cache.SetSnapshot(ctx, clusterName, snap)
 	if err != nil {
 		return errors.WithMessage(err, "failed set snapshot")
 	}
@@ -130,23 +135,18 @@ func (p *Manager) readConfigState(ctx context.Context) (*ConfigState, error) {
 	if err != nil {
 		return nil, errors.AddStack(err)
 	}
-	serviceGroups, err := p.prov.ListServiceGroups(ctx)
-	if err != nil {
-		return nil, errors.AddStack(err)
-	}
-	staticUpstreams, err := p.prov.ListStaticUpstreams(ctx)
+	services, err := p.prov.ListServices(ctx)
 	if err != nil {
 		return nil, errors.AddStack(err)
 	}
 	return &ConfigState{
-		DomainGroups:    domainGroups,
-		ServiceGroups:   serviceGroups,
-		StaticUpstreams: staticUpstreams,
+		DomainGroups: domainGroups,
+		Services:     services,
 	}, nil
 }
 
-func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (*envoycache.Snapshot, error) {
-	listener_, err := p.createListener(ctx)
+func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (envoycache.ResourceSnapshot, error) {
+	listeners, err := p.createListeners(ctx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -163,49 +163,12 @@ func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (*envo
 		return nil, err
 	}
 
-	virtualHostList := easy.MapValues(virtualHosts).([]*route.VirtualHost)
-	sort.Slice(virtualHostList, func(i, j int) bool {
-		return virtualHostList[i].Name < virtualHostList[j].Name
-	})
-
-	rte := &route.RouteConfiguration{
-		Name:         "should_be_envoy_cluster_name",
-		VirtualHosts: virtualHostList,
-	}
-	manager := &hcm.HttpConnectionManager{
-		CodecType:  hcm.HttpConnectionManager_AUTO,
-		StatPrefix: "ingress_http",
-		RouteSpecifier: &hcm.HttpConnectionManager_RouteConfig{
-			RouteConfig: rte,
-		},
-		HttpFilters: []*hcm.HttpFilter{
-			{
-				Name: wellknown.Router,
-			},
-		},
-	}
-	pbst, err := ptypes.MarshalAny(manager)
-	if err != nil {
-		return nil, err
-	}
-	listener_.FilterChains = []*listener.FilterChain{
-		{
-			Filters: []*listener.Filter{
-				{
-					Name: wellknown.HTTPConnectionManager,
-					ConfigType: &listener.Filter_TypedConfig{
-						TypedConfig: pbst,
-					},
-				},
-			},
-		},
-	}
-
 	version := fmt.Sprint(time.Now().UnixNano())
 	snap, err := envoycache.NewSnapshot(version, map[resource.Type][]envoytypes.Resource{
 		resource.EndpointType: endpoints,
 		resource.ClusterType:  clusters,
-		resource.ListenerType: {listener_},
+		resource.RouteType:    virtualHosts,
+		resource.ListenerType: listeners,
 	})
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed create snapshot")
@@ -213,110 +176,200 @@ func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (*envo
 	if err = snap.Consistent(); err != nil {
 		return nil, errors.WithMessage(err, "snapshot is not consistent")
 	}
-	return &snap, nil
+	return snap, nil
 }
 
-func (p *Manager) createListener(ctx context.Context) (*listener.Listener, error) {
-	listener_ := &listener.Listener{
-		Name: "listener_0",
-		Address: &core.Address{
-			Address: &core.Address_SocketAddress{
-				SocketAddress: &core.SocketAddress{
-					Protocol: core.SocketAddress_TCP,
-					Address:  "0.0.0.0",
-					PortSpecifier: &core.SocketAddress_PortValue{
-						PortValue: 10000,
+func (p *Manager) createListeners(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+	result := make([]envoytypes.Resource, 0)
+	listenerMap := make(map[string]*listener.Listener)
+
+	portSet := set.New[uint]()
+	for _, svc := range state.Services {
+		for _, svcRoute := range svc.Routes {
+			for _, domainGrp := range svcRoute.DomainGroups {
+				ports := domainGrp.Ports
+				if len(ports) == 0 {
+					ports = []uint{80}
+				}
+				portSet.Add(ports...)
+			}
+		}
+	}
+
+	portList := easy.Sort(portSet.Slice())
+	for _, port := range portList {
+
+		// TODO: envoy cluster name
+		listenerName := getListenerName(port)
+		if listenerMap[listenerName] != nil {
+			continue
+		}
+
+		httpFilterPbst, _ := anypb.New(&routerv3.Router{})
+		manager := &hcm.HttpConnectionManager{
+			CodecType:  hcm.HttpConnectionManager_AUTO,
+			StatPrefix: "ingress_http",
+			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+				Rds: &hcm.Rds{
+					RouteConfigName: listenerName,
+					ConfigSource: &core.ConfigSource{
+						ResourceApiVersion: resource.DefaultAPIVersion,
+						ConfigSourceSpecifier: &core.ConfigSource_Ads{
+							Ads: &core.AggregatedConfigSource{},
+						},
 					},
 				},
 			},
-		},
-	}
-	return listener_, nil
-}
-
-func (p *Manager) createVirtualHosts(ctx context.Context, state *ConfigState) (map[string]*route.VirtualHost, error) {
-	result := make(map[string]*route.VirtualHost, len(state.DomainGroups))
-	domainGroupMap := easy.ToMap(state.DomainGroups, "Name").(map[string]*model.DomainGroup)
-	extraRoutes := make(map[string][]*route.Route)
-	for _, group := range state.ServiceGroups {
-		domainGroup := domainGroupMap[group.DefaultDomainGroup]
-		if domainGroup == nil {
-			return nil, errors.Errorf("domain group %v not exists", group.DefaultDomainGroup)
+			HttpFilters: []*hcm.HttpFilter{{
+				Name: wellknown.Router,
+				ConfigType: &hcm.HttpFilter_TypedConfig{
+					TypedConfig: httpFilterPbst,
+				},
+			}},
+		}
+		pbst, err := anypb.New(manager)
+		if err != nil {
+			return nil, err
 		}
 
-		for _, staticSvc := range group.StaticServices {
-			clusterName := staticSvc.Upstream
-			for _, location := range staticSvc.Locations {
-				route_, err := makeRoute(location)
-				if err != nil {
-					return nil, errors.WithMessage(err, "failed make route")
-				}
-
-				route_.Action = &route.Route_Route{
-					Route: &route.RouteAction{
-						ClusterSpecifier: &route.RouteAction_Cluster{
-							Cluster: clusterName,
+		listener_ := &listener.Listener{
+			Name: listenerName,
+			Address: &core.Address{
+				Address: &core.Address_SocketAddress{
+					SocketAddress: &core.SocketAddress{
+						Protocol: core.SocketAddress_TCP,
+						Address:  "0.0.0.0",
+						PortSpecifier: &core.SocketAddress_PortValue{
+							PortValue: uint32(port),
 						},
 					},
-				}
-				addRouteToVirtualHost(route_, result, domainGroup)
-
-				if len(location.ExtraDomainGroups) > 0 {
-					for _, extraDG := range location.ExtraDomainGroups {
-						dg := domainGroupMap[extraDG]
-						if dg == nil {
-							return nil, errors.Errorf("domain group %v not found", extraDG)
-						}
-
-						copyRoute := &route.Route{}
-						copyMessage(copyRoute, route_)
-						extraRoutes[dg.Name] = append(extraRoutes[dg.Name], copyRoute)
-					}
-				}
-			}
-		}
-
-		for _, svc := range group.Services {
-			clusterName := svc.Name
-			for _, location := range svc.Locations {
-				route_, err := makeRoute(location)
-				if err != nil {
-					return nil, errors.WithMessage(err, "failed make route")
-				}
-
-				route_.Action = &route.Route_Route{
-					Route: &route.RouteAction{
-						ClusterSpecifier: &route.RouteAction_Cluster{
-							Cluster: clusterName,
+				},
+			},
+			FilterChains: []*listener.FilterChain{
+				{
+					Filters: []*listener.Filter{
+						{
+							Name: wellknown.HTTPConnectionManager,
+							ConfigType: &listener.Filter_TypedConfig{
+								TypedConfig: pbst,
+							},
 						},
 					},
-				}
-				addRouteToVirtualHost(route_, result, domainGroup)
-
-				if len(location.ExtraDomainGroups) > 0 {
-					for _, extraDG := range location.ExtraDomainGroups {
-						dg := domainGroupMap[extraDG]
-						if dg == nil {
-							return nil, errors.Errorf("domain group %v not found", extraDG)
-						}
-
-						copyRoute := &route.Route{}
-						copyMessage(copyRoute, route_)
-						extraRoutes[dg.Name] = append(extraRoutes[dg.Name], copyRoute)
-					}
-				}
-			}
+				},
+			},
 		}
-	}
-	for _, vhost := range result {
-		if extra, ok := extraRoutes[vhost.Name]; ok {
-			vhost.Routes = append(vhost.Routes, extra...)
-		}
+		result = append(result, listener_)
 	}
 	return result, nil
 }
 
-func makeRoute(location *model.Location) (*route.Route, error) {
+func (p *Manager) createVirtualHosts(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+
+	result := make([]envoytypes.Resource, 0)
+	vhostMap := make(map[string]*route.VirtualHost)
+
+	domainGroupMap := make(map[string]*api.DomainGroup)
+	for _, group := range state.DomainGroups {
+		domainGroupMap[group.Name] = group
+	}
+
+	portDomainGroupMap := make(map[uint][]string)
+
+	for _, service := range state.Services {
+
+		// TODO: directives
+
+		clusterName := service.Cluster
+
+		for _, svcRoute := range service.Routes {
+
+			routes_ := make([]*route.Route, 0, len(svcRoute.Locations))
+			for _, loc := range svcRoute.Locations {
+				route_, err := makeRoute(loc)
+				if err != nil {
+					return nil, errors.WithMessage(err, "make route")
+				}
+				route_.Action = &route.Route_Route{
+					Route: &route.RouteAction{
+						ClusterSpecifier: &route.RouteAction_Cluster{
+							Cluster: clusterName,
+						},
+					},
+				}
+				routes_ = append(routes_, route_)
+			}
+
+			for _, routeDomainGrpAndPorts := range svcRoute.DomainGroups {
+				domainGrpName := routeDomainGrpAndPorts.Name
+				domainGroup := domainGroupMap[domainGrpName]
+				if domainGroup == nil {
+					return nil, errors.Errorf("domain group %v not exists", domainGrpName)
+				}
+
+				ports := routeDomainGrpAndPorts.Ports
+				if len(ports) == 0 {
+					ports = []uint{80}
+				}
+				for _, port := range ports {
+
+					if !easy.InStrings(portDomainGroupMap[port], domainGrpName) {
+						portDomainGroupMap[port] = append(portDomainGroupMap[port], domainGrpName)
+					}
+
+					vhostName := getVirtualHostName(port, domainGrpName)
+					vhost := vhostMap[vhostName]
+					if vhost == nil {
+						vhost = &route.VirtualHost{
+							Name: vhostName,
+						}
+						vhostMap[vhostName] = vhost
+					}
+					for _, dn := range domainGroup.Domains {
+						if !easy.InStrings(vhost.Domains, dn) {
+							vhost.Domains = append(vhost.Domains, dn)
+						}
+						dnWithPort := fmt.Sprintf("%s:%d", dn, port)
+						if !easy.InStrings(vhost.Domains, dnWithPort) {
+							vhost.Domains = append(vhost.Domains, dnWithPort)
+						}
+					}
+					vhost.Routes = append(vhost.Routes, routes_...)
+				}
+			}
+		}
+	}
+
+	rcMap := make(map[string]*route.RouteConfiguration)
+	for port, domainGroupNames := range portDomainGroupMap {
+		for _, domainGrpName := range domainGroupNames {
+			listenerName := getListenerName(port)
+			vhostName := getVirtualHostName(port, domainGrpName)
+			vhost := vhostMap[vhostName]
+			if vhost == nil {
+				return nil, errors.Errorf("got unexpected nil virtualHost %s", vhostName)
+			}
+			rc := rcMap[listenerName]
+			if rc == nil {
+				rc = &route.RouteConfiguration{
+					Name: listenerName,
+					ValidateClusters: &wrappers.BoolValue{
+						Value: false,
+					},
+					IgnorePortInHostMatching: true,
+				}
+				rcMap[listenerName] = rc
+				result = append(result, rc)
+			}
+			rc.VirtualHosts = append(rc.VirtualHosts, vhost)
+		}
+	}
+
+	zlog.TRACE("virtualHosts result: %v", result)
+
+	return result, nil
+}
+
+func makeRoute(location *api.Location) (*route.Route, error) {
 	var match *route.RouteMatch
 	if location.Path != "" {
 		match = &route.RouteMatch{
@@ -324,17 +377,17 @@ func makeRoute(location *model.Location) (*route.Route, error) {
 				Prefix: location.Path,
 			},
 		}
-	} else if location.RePath != "" {
+	} else if location.RegexPath != "" {
 		match = &route.RouteMatch{
 			PathSpecifier: &route.RouteMatch_SafeRegex{
 				SafeRegex: &matcher.RegexMatcher{
 					EngineType: &matcher.RegexMatcher_GoogleRe2{},
-					Regex:      location.RePath,
+					Regex:      location.RegexPath,
 				},
 			},
 		}
 	} else {
-		return nil, errors.Errorf("location path/re_path is empty")
+		return nil, errors.Errorf("location path/regex_path is empty")
 	}
 	result := &route.Route{
 		Match: match,
@@ -342,31 +395,82 @@ func makeRoute(location *model.Location) (*route.Route, error) {
 	return result, nil
 }
 
-func addRouteToVirtualHost(route_ *route.Route, vh map[string]*route.VirtualHost, dg *model.DomainGroup) {
-	vhost := vh[dg.Name]
-	if vhost == nil {
-		vhost = &route.VirtualHost{
-			Name:    dg.Name,
-			Domains: dg.Domains,
-			Routes:  nil,
+func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+
+	result := make([]envoytypes.Resource, 0)
+	clusterSet := set.New[string]()
+
+	addXdsCluster := func(serviceName string) {
+		if clusterSet.Contains(serviceName) {
+			return
 		}
-		vh[dg.Name] = vhost
+		clus := p.makeCluster(serviceName)
+		result = append(result, clus)
+		clusterSet.Add(serviceName)
 	}
-	vhost.Routes = append(vhost.Routes, route_)
+
+	for _, service := range state.Services {
+		clusterName := service.Cluster
+		addXdsCluster(clusterName)
+		for _, svcRoute := range service.Routes {
+			for _, loc := range svcRoute.Locations {
+				for _, spl := range loc.Splitting {
+					addXdsCluster(spl.DestCluster)
+				}
+			}
+		}
+	}
+
+	zlog.TRACE("clusters result: %v", result)
+
+	return result, nil
 }
 
-func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
-	result := make([]envoytypes.Resource, 0)
+func (p *Manager) makeCluster(serviceName string) *cluster.Cluster {
+	zlog.TRACE("makeCluster serviceName = %v", serviceName)
+	clus := &cluster.Cluster{
+		Name:           serviceName,
+		ConnectTimeout: durationpb.New(time.Second),
+		ClusterDiscoveryType: &cluster.Cluster_Type{
+			Type: cluster.Cluster_EDS,
+		},
+		EdsClusterConfig: &cluster.Cluster_EdsClusterConfig{
+			ServiceName: serviceName,
+			EdsConfig: &core.ConfigSource{
+				ResourceApiVersion: resource.DefaultAPIVersion,
+				ConfigSourceSpecifier: &core.ConfigSource_Ads{
+					Ads: &core.AggregatedConfigSource{},
+				},
+			},
+		},
+	}
+	return clus
+}
 
-	for _, static := range state.StaticUpstreams {
-		clusterName := static.Name
-		var endpoints []*endpoint.LocalityLbEndpoints
-		for _, hostport := range static.Endpoints {
+func (p *Manager) createEndpoints(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+
+	result := make([]envoytypes.Resource, 0)
+	clusterSet := set.New[string]()
+
+	addEndpoints := func(serviceName string) error {
+		if clusterSet.Contains(serviceName) {
+			return nil
+		}
+		endpoints, err := p.prov.DiscoverEndpoints(ctx, serviceName)
+		if err != nil {
+			return errors.AddStack(err)
+		}
+		cla := &endpoint.ClusterLoadAssignment{
+			ClusterName: serviceName,
+			Endpoints:   nil,
+		}
+		for _, endp := range endpoints {
+			hostport := endp.Addr
 			host, port, err := net.SplitHostPort(hostport)
 			if err != nil {
-				return nil, errors.WithMessagef(err, "addr %v is invalid", hostport)
+				return errors.AddStack(err)
 			}
-			endpoints = append(endpoints, &endpoint.LocalityLbEndpoints{
+			cla.Endpoints = append(cla.Endpoints, &endpoint.LocalityLbEndpoints{
 				LbEndpoints: []*endpoint.LbEndpoint{
 					{
 						HostIdentifier: &endpoint.LbEndpoint_Endpoint{
@@ -374,8 +478,8 @@ func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]env
 								Address: &core.Address{
 									Address: &core.Address_SocketAddress{
 										SocketAddress: &core.SocketAddress{
-											Address:  host,
 											Protocol: core.SocketAddress_TCP,
+											Address:  host,
 											PortSpecifier: &core.SocketAddress_PortValue{
 												PortValue: cast.ToUint32(port),
 											},
@@ -388,92 +492,28 @@ func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]env
 				},
 			})
 		}
-
-		clus := &cluster.Cluster{
-			Name:           clusterName,
-			ConnectTimeout: ptypes.DurationProto(time.Second),
-			ClusterDiscoveryType: &cluster.Cluster_Type{
-				Type: cluster.Cluster_STATIC,
-			},
-			DnsLookupFamily: cluster.Cluster_V4_ONLY,
-			LbPolicy:        cluster.Cluster_ROUND_ROBIN,
-			LoadAssignment: &endpoint.ClusterLoadAssignment{
-				ClusterName: clusterName,
-				Endpoints:   endpoints,
-			},
-		}
-		result = append(result, clus)
+		result = append(result, cla)
+		clusterSet.Add(serviceName)
+		return nil
 	}
 
-	for _, svcGroup := range state.ServiceGroups {
-		for _, svc := range svcGroup.Services {
-			clusterName := svc.Name
-			clus := &cluster.Cluster{
-				Name:           clusterName,
-				ConnectTimeout: ptypes.DurationProto(time.Second),
-				ClusterDiscoveryType: &cluster.Cluster_Type{
-					Type: cluster.Cluster_EDS,
-				},
-				EdsClusterConfig: &cluster.Cluster_EdsClusterConfig{
-					EdsConfig: &core.ConfigSource{
-						ResourceApiVersion:    core.ApiVersion_V3,
-						ConfigSourceSpecifier: &core.ConfigSource_Ads{},
-					},
-					ServiceName: clusterName,
-				},
-			}
-			result = append(result, clus)
+	for _, service := range state.Services {
+		clusterName := service.Cluster
+		if err := addEndpoints(clusterName); err != nil {
+			return nil, err
 		}
-	}
-
-	return result, nil
-}
-
-func (p *Manager) createEndpoints(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
-	result := make([]envoytypes.Resource, 0)
-
-	for _, svcGroup := range state.ServiceGroups {
-		for _, svc := range svcGroup.Services {
-			svcEndpoints, err := p.prov.DiscoverEndpoints(ctx, svc.Name)
-			if err != nil {
-				return nil, errors.AddStack(err)
-			}
-			cla := &endpoint.ClusterLoadAssignment{
-				ClusterName: svc.Name,
-				Endpoints:   nil,
-			}
-			for _, endp := range svcEndpoints {
-				hostport := endp.Addr
-				host, port, err := net.SplitHostPort(hostport)
-				if err != nil {
-					return nil, errors.AddStack(err)
+		for _, svcRoute := range service.Routes {
+			for _, loc := range svcRoute.Locations {
+				for _, spl := range loc.Splitting {
+					if err := addEndpoints(spl.DestCluster); err != nil {
+						return nil, err
+					}
 				}
-
-				cla.Endpoints = append(cla.Endpoints, &endpoint.LocalityLbEndpoints{
-					LbEndpoints: []*endpoint.LbEndpoint{
-						{
-							HostIdentifier: &endpoint.LbEndpoint_Endpoint{
-								Endpoint: &endpoint.Endpoint{
-									Address: &core.Address{
-										Address: &core.Address_SocketAddress{
-											SocketAddress: &core.SocketAddress{
-												Protocol: core.SocketAddress_TCP,
-												Address:  host,
-												PortSpecifier: &core.SocketAddress_PortValue{
-													PortValue: cast.ToUint32(port),
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				})
 			}
-			result = append(result, cla)
 		}
 	}
+
+	zlog.TRACE("endpoints result: %v", result)
 
 	return result, nil
 }
@@ -485,7 +525,7 @@ func Run(provider provider.Provider, listenAddr string) (chan struct{}, error) {
 		return nil, err
 	}
 
-	ctx := context.TODO()
+	ctx := context.Background()
 	err = manager.RunServer(ctx, listenAddr)
 	if err != nil {
 		return nil, err

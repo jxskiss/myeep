@@ -6,8 +6,11 @@ import (
 	"sync"
 
 	discoverygrpc "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
-	"github.com/jxskiss/gopkg/exp/zlog"
+	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
+	"github.com/jxskiss/gopkg/v2/zlog"
 )
+
+var _ serverv3.Callbacks = &Callbacks{}
 
 type Callbacks struct {
 	mu       sync.Mutex

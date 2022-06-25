@@ -1,0 +1,30 @@
+name: "prod1.sub1.mod2"
+cluster: "prod1.sub1.mod2"
+directives:
+  - "hash $request_uri consistent"
+routes:
+  - domain_groups:
+      - name: abc.example.com
+        ports: [10024, 10025]
+    directives: [ ]
+    locations:
+      - path: "/abc2/feeds/"
+        directives:
+          - "proxy_send_timeout 10s"
+        splitting:
+          - type: percent
+            arguments: [ "$http_x_my_header", "20.00%" ]
+            dest_cluster: "prod1.sub1.mod2_gray"
+      - regex_path: "/users/\\d+/"
+        directives:
+          - "set $my_route_var $http_app_env$cookie_app_env"
+        splitting:
+          - type: regex
+            arguments: [ "$my_route_var", "^gray$" ]
+            dest_cluster: "prod1.sub1.mod2_gray"
+          - type: regex
+            arguments: [ "$http_app_env", "^gray$" ]
+            dest_cluster: "prod1.sub1.mod2_gray"
+          - type: percent
+            arguments: [ "random", "0.01%" ]
+            dest_cluster: "prod1.sub1.mod2_gray"

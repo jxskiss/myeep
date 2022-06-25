@@ -53,7 +53,6 @@ node:
   id: {{ .NodeId }}
 
 admin:
-  access_log_path: /dev/null
   address:
     socket_address:
       address: 127.0.0.1

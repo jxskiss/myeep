@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
-	"os"
 	"path/filepath"
 
 	"github.com/jxskiss/errors"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 
-	"github.com/jxskiss/myxdsdemo/pkg/model"
+	"github.com/jxskiss/myxdsdemo/pkg/api"
 )
 
 func NewFileProvider(rootDir string) Provider {
@@ -24,34 +23,38 @@ type fileProvider struct {
 	rootDir string
 }
 
-type domainGroups struct {
+type domainGroupIndex struct {
 	DomainGroups []string `yaml:"domain_groups"`
 }
 
-func (p *fileProvider) ListDomainGroups(ctx context.Context) ([]*model.DomainGroup, error) {
-	groupsFile := filepath.Join(p.rootDir, "domain_groups.yaml")
-	data, err := ioutil.ReadFile(groupsFile)
-	if err != nil {
-		return nil, errors.AddStack(err)
-	}
-
-	groups := &domainGroups{}
-	err = yaml.Unmarshal(data, groups)
-	if err != nil {
-		return nil, errors.AddStack(err)
-	}
-	return p.readDomainGroupsFiles(ctx, groups.DomainGroups)
+type serviceIndex struct {
+	Services []string `yaml:"services"`
 }
 
-func (p *fileProvider) readDomainGroupsFiles(ctx context.Context, groups []string) ([]*model.DomainGroup, error) {
-	result := make([]*model.DomainGroup, 0, len(groups))
+func (p *fileProvider) ListDomainGroups(ctx context.Context) ([]*api.DomainGroup, error) {
+	indexFile := filepath.Join(p.rootDir, "domain_group_index.yaml")
+	data, err := ioutil.ReadFile(indexFile)
+	if err != nil {
+		return nil, errors.AddStack(err)
+	}
+
+	groupIndex := &domainGroupIndex{}
+	err = yaml.Unmarshal(data, groupIndex)
+	if err != nil {
+		return nil, errors.AddStack(err)
+	}
+	return p.readDomainGroupsFiles(ctx, groupIndex.DomainGroups)
+}
+
+func (p *fileProvider) readDomainGroupsFiles(ctx context.Context, groups []string) ([]*api.DomainGroup, error) {
+	result := make([]*api.DomainGroup, 0, len(groups))
 	for _, groupName := range groups {
 		groupFile := filepath.Join(p.rootDir, "domain_groups", groupName+".yaml")
 		data, err := ioutil.ReadFile(groupFile)
 		if err != nil {
 			return nil, errors.AddStack(err)
 		}
-		domainGroup := &model.DomainGroup{}
+		domainGroup := &api.DomainGroup{}
 		err = yaml.Unmarshal(data, domainGroup)
 		if err != nil {
 			return nil, errors.AddStack(err)
@@ -61,47 +64,45 @@ func (p *fileProvider) readDomainGroupsFiles(ctx context.Context, groups []strin
 	return result, nil
 }
 
-func (p *fileProvider) ListServiceGroups(ctx context.Context) ([]*model.ServiceGroup, error) {
-	result := make([]*model.ServiceGroup, 0)
-	groupsDir := filepath.Join(p.rootDir, "service_groups")
-	dirEntries, err := os.ReadDir(groupsDir)
+func (p *fileProvider) ListServices(ctx context.Context) ([]*api.Service, error) {
+	indexFile := filepath.Join(p.rootDir, "service_index.yaml")
+	data, err := ioutil.ReadFile(indexFile)
 	if err != nil {
 		return nil, errors.AddStack(err)
 	}
-	for _, f := range dirEntries {
-		if f.IsDir() {
-			continue
-		}
-		groupFile := filepath.Join(groupsDir, f.Name())
-		data, err := ioutil.ReadFile(groupFile)
+
+	serviceIdx := &serviceIndex{}
+	err = yaml.Unmarshal(data, serviceIdx)
+	if err != nil {
+		return nil, errors.AddStack(err)
+	}
+	return p.readServiceFiles(ctx, serviceIdx.Services)
+}
+
+func (p *fileProvider) readServiceFiles(ctx context.Context, services []string) ([]*api.Service, error) {
+	result := make([]*api.Service, 0)
+	for _, srvName := range services {
+		srvFile := filepath.Join(p.rootDir, "services", srvName+".yaml")
+		data, err := ioutil.ReadFile(srvFile)
 		if err != nil {
 			return nil, errors.AddStack(err)
 		}
-		serviceGroup := &model.ServiceGroup{}
-		err = yaml.Unmarshal(data, serviceGroup)
+		service := &api.Service{}
+		err = yaml.Unmarshal(data, service)
 		if err != nil {
 			return nil, errors.AddStack(err)
 		}
-		result = append(result, serviceGroup)
+		result = append(result, service)
 	}
 	return result, nil
 }
 
-func (p *fileProvider) ListStaticUpstreams(ctx context.Context) ([]*model.StaticUpstream, error) {
-	upstreamsFile := filepath.Join(p.rootDir, "static_upstreams.yaml")
-	data, err := ioutil.ReadFile(upstreamsFile)
-	if err != nil {
-		return nil, errors.AddStack(err)
-	}
-	upstreams := make([]*model.StaticUpstream, 0)
-	err = yaml.Unmarshal(data, &upstreams)
-	if err != nil {
-		return nil, errors.AddStack(err)
-	}
-	return upstreams, nil
+func (p *fileProvider) WatchConfig(ctx context.Context) <-chan struct{} {
+	// TODO
+	return nil
 }
 
-func (p *fileProvider) DiscoverEndpoints(ctx context.Context, serviceName string) ([]*model.Endpoint, error) {
+func (p *fileProvider) DiscoverEndpoints(ctx context.Context, cluster string) ([]*api.Endpoint, error) {
 	mockIp := func() string {
 		return fmt.Sprintf("192.168.1.%d", rand.Intn(100)+1)
 	}
@@ -110,10 +111,10 @@ func (p *fileProvider) DiscoverEndpoints(ctx context.Context, serviceName string
 	}
 
 	n := rand.Intn(5) + 3 // mock at least 3 endpoints
-	result := make([]*model.Endpoint, 0, n)
+	result := make([]*api.Endpoint, 0, n)
 	for i := 0; i < n; i++ {
 		addr := fmt.Sprintf("%s:%d", mockIp(), mockPort())
-		result = append(result, &model.Endpoint{
+		result = append(result, &api.Endpoint{
 			Addr:     addr,
 			Cluster:  "default",
 			Env:      "",
@@ -122,11 +123,6 @@ func (p *fileProvider) DiscoverEndpoints(ctx context.Context, serviceName string
 		})
 	}
 	return result, nil
-}
-
-func (p *fileProvider) WatchConfig(ctx context.Context) <-chan struct{} {
-	// TODO: watch file changes
-	return nil
 }
 
 func (p *fileProvider) WatchEndpoints(ctx context.Context) <-chan struct{} {

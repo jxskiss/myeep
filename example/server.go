@@ -1,23 +1,25 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 
-	"github.com/jxskiss/gopkg/easy"
-	"github.com/jxskiss/gopkg/exp/zlog"
+	"github.com/jxskiss/gopkg/v2/easy"
+	"github.com/jxskiss/gopkg/v2/zlog"
+	"github.com/jxskiss/mcli"
 )
 
-var argPorts = flag.String("p", "", "ports to listen")
-
 func main() {
-	flag.Parse()
-	zlog.SetupGlobals(&zlog.Config{Development: true}, true)
+	zlog.SetDevelopment()
 	defer zlog.Sync()
 
-	portList, _ := easy.ParseInt64s(*argPorts, ",", true)
+	var args struct {
+		Ports string `cli:"#R, -p, ports to listen, split by comma"`
+	}
+	mcli.Parse(&args)
+	portList := easy.ParseInts[int64](strings.Split(args.Ports, ","), 10)
 	if len(portList) == 0 {
 		zlog.Fatal("invalid argument -p")
 	}
