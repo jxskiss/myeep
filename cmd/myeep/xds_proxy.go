@@ -16,7 +16,7 @@ import (
 )
 
 type xdsProxyArgs struct {
-	UnixSocket string   `cli:"-U, --unix-socket, Unix-socket to listen on" default:"/tmp/myxdsdemo-xdsproxy.sock"`
+	UnixSocket string   `cli:"-U, --unix-socket, Unix-socket to listen on" default:"/tmp/myeep-xdsproxy.sock"`
 	XdsServers []string `cli:"#R, -x, --xds-server, XDS server to proxy connection to"`
 }
 

@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/jxskiss/myxdsdemo/pkg/api"
+	"github.com/jxskiss/myeep/pkg/api"
 )
 
 type Provider interface {

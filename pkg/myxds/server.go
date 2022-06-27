@@ -37,8 +37,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/jxskiss/myxdsdemo/pkg/api"
-	"github.com/jxskiss/myxdsdemo/pkg/provider"
+	"github.com/jxskiss/myeep/pkg/api"
+	"github.com/jxskiss/myeep/pkg/provider"
 )
 
 const grpcMaxConcurrentStreams = 100000

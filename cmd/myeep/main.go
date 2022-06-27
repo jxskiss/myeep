@@ -7,9 +7,9 @@ import (
 	"github.com/jxskiss/gopkg/v2/zlog"
 	"github.com/jxskiss/mcli"
 
-	"github.com/jxskiss/myxdsdemo/pkg/envoy"
-	"github.com/jxskiss/myxdsdemo/pkg/myxds"
-	"github.com/jxskiss/myxdsdemo/pkg/provider"
+	"github.com/jxskiss/myeep/pkg/envoy"
+	"github.com/jxskiss/myeep/pkg/myxds"
+	"github.com/jxskiss/myeep/pkg/provider"
 )
 
 func main() {

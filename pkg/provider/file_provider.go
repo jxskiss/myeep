@@ -10,7 +10,7 @@ import (
 	"github.com/jxskiss/errors"
 	"gopkg.in/yaml.v3"
 
-	"github.com/jxskiss/myxdsdemo/pkg/api"
+	"github.com/jxskiss/myeep/pkg/api"
 )
 
 func NewFileProvider(rootDir string) Provider {
