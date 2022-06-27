@@ -12,10 +12,13 @@ import (
 )
 
 type Configuration struct {
-	Cluster    string   `yaml:"cluster" env:"ENVOY_CLUSTER" default:"infra.l7lb.myxds_demo_envoy"`
-	NodeId     string   `yaml:"nodeId" env:"ENVOY_NODE_ID" default:"a_dummy_demo_envoy_node_id"`
-	LogLevel   string   `yaml:"logLevel" flag:"level"`
-	XdsServers []string `yaml:"xdsServers"`
+	Cluster  string `yaml:"cluster" env:"ENVOY_CLUSTER" default:"infra.l7lb.myxds_demo_envoy"`
+	NodeId   string `yaml:"nodeId" env:"ENVOY_NODE_ID" default:"a_dummy_demo_envoy_node_id"`
+	LogLevel string `yaml:"logLevel" flag:"level"`
+	XDS      struct {
+		ProxySocket string   `yaml:"proxySocket"`
+		Servers     []string `yaml:"servers"`
+	} `yaml:"xds"`
 }
 
 func ReadConfig(path string) (*Configuration, error) {
@@ -31,9 +34,9 @@ func ReadConfig(path string) (*Configuration, error) {
 func Run(cfg *Configuration) (chan struct{}, error) {
 	zlog.Infof("building envoy bootstrap config")
 	bootstrapData := &BootstrapData{
-		Cluster:    cfg.Cluster,
-		NodeId:     cfg.NodeId,
-		XdsServers: parseXdsServerAddresses(cfg.XdsServers),
+		Cluster:  cfg.Cluster,
+		NodeId:   cfg.NodeId,
+		XdsProxy: cfg.XDS.ProxySocket,
 	}
 	bootstrapConfig, err := buildBootstrapConfig(bootstrapData)
 	if err != nil {

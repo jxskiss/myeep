@@ -7,9 +7,9 @@ import (
 	"github.com/jxskiss/gopkg/v2/zlog"
 	"github.com/jxskiss/mcli"
 
-	"github.com/jxskiss/myxdsdemo/envoy"
-	"github.com/jxskiss/myxdsdemo/myxds"
-	"github.com/jxskiss/myxdsdemo/myxds/provider"
+	"github.com/jxskiss/myxdsdemo/pkg/envoy"
+	"github.com/jxskiss/myxdsdemo/pkg/myxds"
+	"github.com/jxskiss/myxdsdemo/pkg/provider"
 )
 
 func main() {
@@ -19,8 +19,9 @@ func main() {
 	app := mcli.NewApp()
 	app.Add("envoy", runEnvoy, "Run envoy server")
 	app.Add("envoy dump", dumpEnvoyConfig, "Dump envoy configuration")
-	app.Add("envoy tools", runEnvoyTools, "Run envoy config tools")
+	app.Add("envoy tools", runEnvoyTools, "Run envoy config tools (not implemented)")
 	app.Add("xds", runXdsServer, "Run xDS server")
+	app.Add("xds proxy", cmdXdsProxy, "Run local xDS proxy")
 	app.Run()
 }
 
@@ -41,6 +42,10 @@ func runEnvoy(ctx *mcli.Context) {
 	if args.LogLevel != "" {
 		cfg.LogLevel = args.LogLevel
 	}
+
+	// Start xds proxy in background.
+	runXdsProxy(cfg.XDS.ProxySocket, cfg.XDS.Servers)
+
 	exit, err := envoy.Run(cfg)
 	if err != nil {
 		zlog.Fatalf("failed run envoy: %v", err)

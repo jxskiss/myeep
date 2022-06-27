@@ -2,37 +2,15 @@ package envoy
 
 import (
 	"bytes"
-	"fmt"
-	"net"
 	"text/template"
 
 	"github.com/jxskiss/errors"
 )
 
-type XdsServerAddress struct {
-	Host string
-	Port string
-}
-
-func parseXdsServerAddresses(addresses []string) []XdsServerAddress {
-	out := make([]XdsServerAddress, 0, len(addresses))
-	for _, addr := range addresses {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			panic(fmt.Sprintf("xds server address %v is invalid", addr))
-		}
-		out = append(out, XdsServerAddress{
-			Host: host,
-			Port: port,
-		})
-	}
-	return out
-}
-
 type BootstrapData struct {
-	Cluster    string
-	NodeId     string
-	XdsServers []XdsServerAddress
+	Cluster  string
+	NodeId   string
+	XdsProxy string
 }
 
 func buildBootstrapConfig(data *BootstrapData) ([]byte, error) {
@@ -85,12 +63,9 @@ static_resources:
       load_assignment:
         cluster_name: xds_cluster
         endpoints:
-          {{- range .XdsServers }}
           - lb_endpoints:
               - endpoint:
                   address:
-                    socket_address:
-                      address: {{ .Host }}
-                      port_value: {{ .Port }}
-          {{- end }}
+                    pipe:
+                      path: "{{ .XdsProxy }}"
 `

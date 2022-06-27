@@ -1,5 +1,7 @@
 cluster: ""
 nodeId: ""
-xdsServers:
-  - 127.0.0.1:8941
+xds:
+  proxySocket: "/tmp/myxdsdemo-xdsproxy.sock"
+  servers:
+    - 127.0.0.1:8941
 logLevel: info

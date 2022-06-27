@@ -37,8 +37,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/jxskiss/myxdsdemo/myxds/provider"
 	"github.com/jxskiss/myxdsdemo/pkg/api"
+	"github.com/jxskiss/myxdsdemo/pkg/provider"
 )
 
 const grpcMaxConcurrentStreams = 100000
@@ -57,22 +57,22 @@ func (_ clusterNameHash) ID(node *core.Node) string {
 	return node.Cluster
 }
 
-type Manager struct {
+type Server struct {
 	prov      provider.Provider
 	cache     envoycache.SnapshotCache
 	callbacks *Callbacks
 }
 
-func NewManager(prov provider.Provider) *Manager {
+func NewManager(prov provider.Provider) *Server {
 	cache := envoycache.NewSnapshotCache(true, clusterNameHash{}, zlog.S())
-	return &Manager{
+	return &Server{
 		prov:      prov,
 		cache:     cache,
 		callbacks: &Callbacks{},
 	}
 }
 
-func (p *Manager) Watch() error {
+func (p *Server) Watch() error {
 	ctx := context.Background()
 	state, err := p.readConfigState(ctx)
 	if err != nil {
@@ -97,7 +97,7 @@ func (p *Manager) Watch() error {
 	return nil
 }
 
-func (p *Manager) RunServer(ctx context.Context, addr string) error {
+func (p *Server) RunServer(ctx context.Context, addr string) error {
 
 	var grpcOpts []grpc.ServerOption
 	grpcOpts = append(grpcOpts, grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams))
@@ -130,7 +130,7 @@ func (p *Manager) RunServer(ctx context.Context, addr string) error {
 	return nil
 }
 
-func (p *Manager) readConfigState(ctx context.Context) (*ConfigState, error) {
+func (p *Server) readConfigState(ctx context.Context) (*ConfigState, error) {
 	domainGroups, err := p.prov.ListDomainGroups(ctx)
 	if err != nil {
 		return nil, errors.AddStack(err)
@@ -145,7 +145,7 @@ func (p *Manager) readConfigState(ctx context.Context) (*ConfigState, error) {
 	}, nil
 }
 
-func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (envoycache.ResourceSnapshot, error) {
+func (p *Server) createSnapshot(ctx context.Context, state *ConfigState) (envoycache.ResourceSnapshot, error) {
 	listeners, err := p.createListeners(ctx, state)
 	if err != nil {
 		return nil, err
@@ -155,6 +155,10 @@ func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (envoy
 		return nil, err
 	}
 	clusters, err := p.createClusters(ctx, state)
+	if err != nil {
+		return nil, err
+	}
+	secrets, err := p.createSecrets(ctx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +173,7 @@ func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (envoy
 		resource.ClusterType:  clusters,
 		resource.RouteType:    virtualHosts,
 		resource.ListenerType: listeners,
+		resource.SecretType:   secrets,
 	})
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed create snapshot")
@@ -179,7 +184,7 @@ func (p *Manager) createSnapshot(ctx context.Context, state *ConfigState) (envoy
 	return snap, nil
 }
 
-func (p *Manager) createListeners(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+func (p *Server) createListeners(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
 	result := make([]envoytypes.Resource, 0)
 	listenerMap := make(map[string]*listener.Listener)
 
@@ -263,7 +268,7 @@ func (p *Manager) createListeners(ctx context.Context, state *ConfigState) ([]en
 	return result, nil
 }
 
-func (p *Manager) createVirtualHosts(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+func (p *Server) createVirtualHosts(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
 
 	result := make([]envoytypes.Resource, 0)
 	vhostMap := make(map[string]*route.VirtualHost)
@@ -395,7 +400,7 @@ func makeRoute(location *api.Location) (*route.Route, error) {
 	return result, nil
 }
 
-func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+func (p *Server) createClusters(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
 
 	result := make([]envoytypes.Resource, 0)
 	clusterSet := set.New[string]()
@@ -426,7 +431,7 @@ func (p *Manager) createClusters(ctx context.Context, state *ConfigState) ([]env
 	return result, nil
 }
 
-func (p *Manager) makeCluster(serviceName string) *cluster.Cluster {
+func (p *Server) makeCluster(serviceName string) *cluster.Cluster {
 	zlog.TRACE("makeCluster serviceName = %v", serviceName)
 	clus := &cluster.Cluster{
 		Name:           serviceName,
@@ -447,7 +452,7 @@ func (p *Manager) makeCluster(serviceName string) *cluster.Cluster {
 	return clus
 }
 
-func (p *Manager) createEndpoints(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+func (p *Server) createEndpoints(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
 
 	result := make([]envoytypes.Resource, 0)
 	clusterSet := set.New[string]()
@@ -516,6 +521,44 @@ func (p *Manager) createEndpoints(ctx context.Context, state *ConfigState) ([]en
 	zlog.TRACE("endpoints result: %v", result)
 
 	return result, nil
+}
+
+/*
+func generateSnapshot(notification *common.Notification) cache.Snapshot {
+	var resources []types.Resource
+
+	for _, cert := range notification.Certificates {
+		secret := &envoy_extensions_transport_sockets_tls_v3.Secret{
+			Name: cert.Domain,
+			Type: &envoy_extensions_transport_sockets_tls_v3.Secret_TlsCertificate{
+				TlsCertificate: &envoy_extensions_transport_sockets_tls_v3.TlsCertificate{
+					CertificateChain: &envoy_config_core_v3.DataSource{
+						Specifier: &envoy_config_core_v3.DataSource_InlineBytes{
+							InlineBytes: cert.Certificate,
+						},
+					},
+					PrivateKey: &envoy_config_core_v3.DataSource{
+						Specifier: &envoy_config_core_v3.DataSource_InlineBytes{
+							InlineBytes: cert.PrivateKey,
+						},
+					},
+				},
+			},
+		}
+		resources = append(resources, secret)
+	}
+
+	return cache.NewSnapshot(fmt.Sprintf("%d", time.Now().Unix()), nil, nil, nil, nil, nil, resources)
+}
+*/
+
+func (p *Server) createSecrets(ctx context.Context, state *ConfigState) ([]envoytypes.Resource, error) {
+
+	result := make([]envoytypes.Resource, 0)
+	_ = result
+
+	// TODO
+	return nil, nil
 }
 
 func Run(provider provider.Provider, listenAddr string) (chan struct{}, error) {
