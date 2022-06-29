@@ -33,6 +33,7 @@ import (
 	"github.com/jxskiss/gopkg/v2/set"
 	"github.com/jxskiss/gopkg/v2/zlog"
 	"github.com/spf13/cast"
+	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -188,15 +189,27 @@ func (p *Server) createListeners(ctx context.Context, state *ConfigState) ([]env
 	result := make([]envoytypes.Resource, 0)
 	listenerMap := make(map[string]*listener.Listener)
 
+	domainGroupMap := make(map[string]*api.DomainGroup)
+	for _, group := range state.DomainGroups {
+		domainGroupMap[group.Name] = group
+	}
+
 	portSet := set.New[uint]()
+	portDomainGroupListMap := make(map[uint][]*api.DomainGroup)
 	for _, svc := range state.Services {
 		for _, svcRoute := range svc.Routes {
-			for _, domainGrp := range svcRoute.DomainGroups {
-				ports := domainGrp.Ports
+			for _, domainGroupAndPorts := range svcRoute.DomainGroups {
+				ports := domainGroupAndPorts.Ports
 				if len(ports) == 0 {
 					ports = []uint{80}
 				}
 				portSet.Add(ports...)
+				for _, port := range ports {
+					domainGrp := domainGroupMap[domainGroupAndPorts.Name]
+					if !slices.Contains(portDomainGroupListMap[port], domainGrp) {
+						portDomainGroupListMap[port] = append(portDomainGroupListMap[port], domainGrp)
+					}
+				}
 			}
 		}
 	}
@@ -250,19 +263,39 @@ func (p *Server) createListeners(ctx context.Context, state *ConfigState) ([]env
 					},
 				},
 			},
-			FilterChains: []*listener.FilterChain{
-				{
-					Filters: []*listener.Filter{
-						{
-							Name: wellknown.HTTPConnectionManager,
-							ConfigType: &listener.Filter_TypedConfig{
-								TypedConfig: pbst,
-							},
+			//FilterChains: []*listener.FilterChain{
+			//	{
+			//		Filters: []*listener.Filter{
+			//			{
+			//				Name: wellknown.HTTPConnectionManager,
+			//				ConfigType: &listener.Filter_TypedConfig{
+			//					TypedConfig: pbst,
+			//				},
+			//			},
+			//		},
+			//	},
+			//},
+		}
+
+		domainGroups := portDomainGroupListMap[port]
+		for _, domainGrp := range domainGroups {
+			fc := &listener.FilterChain{
+				FilterChainMatch: &listener.FilterChainMatch{
+					ServerNames: domainGrp.Domains,
+				},
+				Filters: []*listener.Filter{
+					{
+						Name: wellknown.HTTPConnectionManager,
+						ConfigType: &listener.Filter_TypedConfig{
+							TypedConfig: pbst,
 						},
 					},
 				},
-			},
+				TransportSocket: nil, // TODO
+			}
+			listener_.FilterChains = append(listener_.FilterChains, fc)
 		}
+
 		result = append(result, listener_)
 	}
 	return result, nil

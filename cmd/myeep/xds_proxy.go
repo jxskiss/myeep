@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -18,6 +19,8 @@ import (
 type xdsProxyArgs struct {
 	UnixSocket string   `cli:"-U, --unix-socket, Unix-socket to listen on" default:"/tmp/myeep-xdsproxy.sock"`
 	XdsServers []string `cli:"#R, -x, --xds-server, XDS server to proxy connection to"`
+
+	Timestamp int64 `cli:"#H, -t, start time of this proxy (millisecond)"`
 }
 
 func cmdXdsProxy(ctx *mcli.Context) {
@@ -32,7 +35,8 @@ func runXdsProxy(unixSocket string, xdsAddrs []string) {
 	// TODO: logging
 
 	binName, _ := os.Executable()
-	args := []string{"xds", "proxy", "-U", unixSocket}
+	nowMilli := fmt.Sprint(time.Now().UnixMilli())
+	args := []string{"xds", "proxy", "-t", nowMilli, "-U", unixSocket}
 	for _, addr := range xdsAddrs {
 		args = append(args, "-x", addr)
 	}
