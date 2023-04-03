@@ -1,8 +1,0 @@
-name: ghi.example.com
-
-domains:
-  - "ghi.example.com"
-  - "ghi-1.example.com"
-  - "ghi-2.example.com"
-
-cert_name: "ghi.example.com"

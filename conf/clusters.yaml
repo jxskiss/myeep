@@ -1,0 +1,12 @@
+{{- if .SSLCertServer.Enable }}
+# ssl-cert-server
+- "!@@ simple_cluster":
+    name: ssl_cert_server
+    endpoints:
+      - "{{ .SSLCertServer.HTTPAddr }}"
+{{- end}}
+
+- "!@@ simple_cluster":
+    name: demo_unix_ping_pong
+    endpoints:
+      - "unix:/tmp/envoy-demo-ping-pong.sock"

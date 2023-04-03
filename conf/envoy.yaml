@@ -1,7 +1,12 @@
-cluster: ""
-nodeId: ""
-xds:
-  proxySocket: "/tmp/myeep-xdsproxy.sock"
-  servers:
-    - 127.0.0.1:8941
+nodeCluster: "example"
+nodeId: "example"
+adminPort: 9000
 logLevel: info
+
+sslCertServer:
+  enable: true
+  httpAddr: "127.0.0.1:8999"
+  sdsAddr: "127.0.0.1:8998"
+  caCert: "./conf/certs/ca.pem"
+  clientCert: "./conf/certs/sds-client.pem"
+  clientKey: "./conf/certs/sds-client-key.pem"

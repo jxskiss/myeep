@@ -1,2 +1,7 @@
 .idea/
+conf/certs/*
+!conf/certs/.gitkeep
+conf/dump/*
 conf/generated/*
+output/
+temp/
