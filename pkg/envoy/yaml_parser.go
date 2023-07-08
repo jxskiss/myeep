@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"github.com/jxskiss/gopkg/v2/easy"
+	"github.com/jxskiss/gopkg/v2/utils/strutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,44 +16,62 @@ type YAMLParser struct {
 	cfg *Configuration
 }
 
-func (p *YAMLParser) solveCommands(data any) any {
+func (p *YAMLParser) solveCommands(path string, data any) (any, error) {
 	switch val := data.(type) {
 	case map[string]any:
-		return p.solveCommandsInMap(val)
+		return p.solveCommandsInMap(path, val)
 	case []any:
-		return p.solveCommandsInSlice(val)
+		return p.solveCommandsInSlice(path, val)
 	}
-	return data
+	return data, nil
 }
 
-func (p *YAMLParser) solveCommandsInMap(data map[string]any) map[string]any {
+func (p *YAMLParser) solveCommandsInMap(path string, data map[string]any) (map[string]any, error) {
+	var err error
 	for k, v := range data {
+		nextPath := getNextPath(path, k)
 		cmd, ok := p.isCommand(v)
 		if !ok {
-			data[k] = p.solveCommands(v)
+			data[k], err = p.solveCommands(nextPath, v)
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
-		cmdResult := p.runCommand(cmd, nil)
-		cmdResult = p.solveCommands(cmdResult)
+		cmdResult, err := p.runCommand(cmd, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: ran command %s: %w", nextPath, cmd, err)
+		}
+		cmdResult, err = p.solveCommands(nextPath, cmdResult)
+		if err != nil {
+			return nil, err
+		}
 		data[k] = cmdResult
 	}
 
 	newData := make(map[string]map[string]any)
 	for k, v := range data {
+		nextPath := getNextPath(path, k)
 		cmd, ok := p.isCommand(k)
 		if !ok {
 			continue
 		}
-		cmdResult := p.runCommand(cmd, v)
+		cmdResult, err := p.runCommand(cmd, v)
+		if err != nil {
+			return nil, fmt.Errorf("%s: run command %s: %w", nextPath, cmd, err)
+		}
 		if cmdResult == nil {
 			delete(data, k)
 			continue
 		}
 		m, ok := cmdResult.(map[string]any)
 		if !ok {
-			panic(fmt.Sprintf("command %s want map result, but got %v", cmd, cmdResult))
+			return nil, fmt.Errorf("%s: command %s want map result, but got %v", path, cmd, cmdResult)
 		}
-		m = p.solveCommandsInMap(m)
+		m, err = p.solveCommandsInMap(nextPath, m)
+		if err != nil {
+			return nil, err
+		}
 		newData[k] = m
 		delete(data, k)
 	}
@@ -59,26 +79,37 @@ func (p *YAMLParser) solveCommandsInMap(data map[string]any) map[string]any {
 	for _, cmdResult := range newData {
 		easy.MergeMapsTo(data, cmdResult)
 	}
-	return data
+	return data, nil
 }
 
-func (p *YAMLParser) solveCommandsInSlice(slice []any) any {
+func (p *YAMLParser) solveCommandsInSlice(path string, slice []any) (any, error) {
 	isSlice := func(a any) bool {
 		_, ok := a.([]any)
 		return ok
 	}
 
+	var err error
 	var i int
 	for i = 0; i < len(slice); {
+		nextPath := getNextPath(path, fmt.Sprintf("[%d]", i))
 		val := slice[i]
 		cmd, ok := p.isCommand(val)
 		if !ok {
-			slice[i] = p.solveCommands(val)
+			slice[i], err = p.solveCommands(nextPath, val)
+			if err != nil {
+				return nil, err
+			}
 			i++
 			continue
 		}
-		cmdResult := p.runCommand(cmd, nil)
-		cmdResult = p.solveCommands(cmdResult)
+		cmdResult, err := p.runCommand(cmd, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: run command %s: %w", nextPath, cmd, err)
+		}
+		cmdResult, err = p.solveCommands(nextPath, cmdResult)
+		if err != nil {
+			return nil, err
+		}
 		if cmdResult == nil {
 			if len(slice) > i+1 {
 				copy(slice[i:], slice[i+1:])
@@ -100,33 +131,60 @@ func (p *YAMLParser) solveCommandsInSlice(slice []any) any {
 		slice = newSlice
 		i += len(s)
 	}
-	return slice
+	return slice, nil
 }
 
-func (p *YAMLParser) executeTemplate(s string, data any) string {
+func (p *YAMLParser) executeTemplate(s string, data any) (string, error) {
 	var buf bytes.Buffer
 	tmpl, err := template.New("").Parse(s)
 	if err != nil {
-		panic(fmt.Sprintf("cannot parse template: %v", err))
+		return "", fmt.Errorf("cannot parse template (%s): %w", limit100(s), err)
 	}
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
-		panic(fmt.Sprintf("cannot execute template: %v", err))
+		return "", fmt.Errorf("cannot execute template (%s): %w", limit100(s), err)
 	}
-	return buf.String()
+	return buf.String(), nil
 }
 
-func (p *YAMLParser) parseYAML(s string, data ...any) any {
+func (p *YAMLParser) parseYAML(s string, data ...any) (any, error) {
+	var err error
 	if len(data) > 0 {
-		s = p.executeTemplate(s, data[0])
+		s, err = p.executeTemplate(s, data[0])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	s = strings.TrimSpace(s)
 
 	var dst any
-	err := yaml.Unmarshal([]byte(s), &dst)
+	err = yaml.Unmarshal([]byte(s), &dst)
 	if err != nil {
-		panic(fmt.Sprintf("cannot parse yaml: %v", err))
+		return nil, fmt.Errorf("cannot parse yaml: %v", err)
 	}
-	return dst
+	return dst, nil
+}
+
+func getNextPath(path, next string) string {
+	sep := "."
+	isSliceIndex := len(next) > 2 && next[0] == '[' && next[len(next)-1] == ']' && strutil.IsASCIIDigit(next[1:len(next)-1])
+	if isSliceIndex {
+		sep = ""
+	}
+	if path == "" {
+		return next
+	}
+	if next == "" {
+		return path
+	}
+	return path + sep + next
+}
+
+func limit100(s string) string {
+	if utf8.RuneCountInString(s) <= 100 {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:97]) + "..."
 }

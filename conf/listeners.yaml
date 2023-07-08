@@ -20,7 +20,7 @@
                 # Config other HTTP virtual hosts here.
 
                 # Demo HTTP endpoint.
-                - name: demo_ping_pong
+                - name: demo_unix_ping_pong
                   domains:
                     - "test.example.com"
                   routes:
@@ -34,9 +34,7 @@
                 - name: force_https
                   domains: [ "*" ]
                   routes:
-                    { { - if .SSLCertServer.Enable } }
                     - "!@@ acme_challenge"
-                    { { - end } }
                     - "!@@ redirect_to_https"
 
 - name: listener_https
@@ -109,7 +107,7 @@
 - name: demo_unix_ping_pong
   '@type': type.googleapis.com/envoy.config.listener.v3.Listener
   "!@@ address": "unix:/tmp/envoy-demo-ping-pong.sock"
-  filters_chain:
+  filter_chains:
     - filters:
         - name: envoy.filters.network.http_connection_manager
           typed_config:

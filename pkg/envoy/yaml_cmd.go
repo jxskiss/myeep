@@ -20,7 +20,7 @@ func (p *YAMLParser) isCommand(a any) (string, bool) {
 	return "", false
 }
 
-func (p *YAMLParser) runCommand(cmd string, arg any) any {
+func (p *YAMLParser) runCommand(cmd string, arg any) (any, error) {
 	switch cmd {
 	case "envoy_node":
 		return p.cmdEnvoyNode(arg)
@@ -41,10 +41,10 @@ func (p *YAMLParser) runCommand(cmd string, arg any) any {
 	case "simple_cluster":
 		return p.cmdSimpleCluster(arg)
 	}
-	panic(fmt.Sprintf("unknown command %q with arg %q", cmd, arg))
+	return nil, fmt.Errorf("unknown command %q with arg %q", cmd, arg)
 }
 
-func (p *YAMLParser) cmdEnvoyNode(arg any) any {
+func (p *YAMLParser) cmdEnvoyNode(arg any) (any, error) {
 	tmpl := `
 node:
   cluster: "{{ .NodeCluster }}"
@@ -53,7 +53,7 @@ node:
 	return p.parseYAML(tmpl, p.cfg)
 }
 
-func (p *YAMLParser) cmdEnvoyAdmin(arg any) any {
+func (p *YAMLParser) cmdEnvoyAdmin(arg any) (any, error) {
 	tmpl := `
 admin:
   address:
@@ -64,10 +64,10 @@ admin:
 	return p.parseYAML(tmpl, p.cfg)
 }
 
-func (p *YAMLParser) cmdAddress(arg any) any {
+func (p *YAMLParser) cmdAddress(arg any) (any, error) {
 	s, ok := arg.(string)
 	if !ok {
-		panic(fmt.Sprintf("cmdAdress arg must be string, got %v", arg))
+		return nil, fmt.Errorf("cmdAddress arg must be string, got %v", arg)
 	}
 
 	// Check unix domain socket.
@@ -79,7 +79,7 @@ func (p *YAMLParser) cmdAddress(arg any) any {
 					"path": pipePath,
 				},
 			},
-		}
+		}, nil
 	}
 
 	// Else it should be an IP:PORT address, other types are not supported.
@@ -91,12 +91,12 @@ func (p *YAMLParser) cmdAddress(arg any) any {
 				"port_value": cast.ToInt(parts[1]),
 			},
 		},
-	}
+	}, nil
 }
 
-func (p *YAMLParser) cmdSDSCluster(arg any) any {
+func (p *YAMLParser) cmdSDSCluster(arg any) (any, error) {
 	tmpl := `
-{{- if .SSLCertServer.Enable }}
+{{- if .SimpleSSL.Enable }}
 name: sds_server_mtls
 typed_extension_protocol_options:
   envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
@@ -111,7 +111,7 @@ load_assignment:
   endpoints:
     - lb_endpoints:
         - endpoint:
-            "!@@ address": "{{ .SSLCertServer.SDSAddr }}"
+            "!@@ address": "{{ .SimpleSSL.SDSAddr }}"
 transport_socket:
   name: envoy.transport_sockets.tls
   typed_config:
@@ -119,15 +119,15 @@ transport_socket:
     common_tls_context:
       tls_certificates:
         - certificate_chain:
-            filename: "{{ .SSLCertServer.ClientCert }}"
+            filename: "{{ .SimpleSSL.ClientCert }}"
           private_key:
-            filename: "{{ .SSLCertServer.ClientKey }}"
+            filename: "{{ .SimpleSSL.ClientKey }}"
 {{- end }}
 `
 	return p.parseYAML(tmpl, p.cfg)
 }
 
-func (p *YAMLParser) cmdDownstreamTlsContext(arg any) any {
+func (p *YAMLParser) cmdDownstreamTlsContext(arg any) (any, error) {
 	tmpl := `
 transport_socket:
   name: envoy.transport_sockets.tls
@@ -148,7 +148,7 @@ transport_socket:
 	return p.parseYAML(tmpl, arg)
 }
 
-func (p *YAMLParser) cmdHTTPRouter(arg any) any {
+func (p *YAMLParser) cmdHTTPRouter(arg any) (any, error) {
 	tmpl := `
 name: envoy.filters.http.router
 typed_config:
@@ -157,17 +157,21 @@ typed_config:
 	return p.parseYAML(tmpl)
 }
 
-func (p *YAMLParser) cmdACMEChallenge(arg any) any {
+func (p *YAMLParser) cmdACMEChallenge(arg any) (any, error) {
+	if !p.cfg.SimpleSSL.Enable {
+		return nil, nil
+	}
+
 	tmpl := `
 match:
   prefix: "/.well-known/acme-challenge/"
 route:
-  cluster: ssl_cert_server
+  cluster: simplessl
 `
 	return p.parseYAML(tmpl)
 }
 
-func (p *YAMLParser) cmdRedirectToHTTPS(arg any) any {
+func (p *YAMLParser) cmdRedirectToHTTPS(arg any) (any, error) {
 	tmpl := `
 match:
   prefix: "/"
@@ -178,7 +182,7 @@ redirect:
 	return p.parseYAML(tmpl)
 }
 
-func (p *YAMLParser) cmdSimpleCluster(arg any) any {
+func (p *YAMLParser) cmdSimpleCluster(arg any) (any, error) {
 	tmpl := `
 name: "{{ .name }}"
 '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster

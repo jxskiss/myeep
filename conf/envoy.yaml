@@ -3,8 +3,9 @@ nodeId: "example"
 adminPort: 9000
 logLevel: info
 
-sslCertServer:
+simpleSSL:
   enable: true
+  clusterName: "simplessl"
   httpAddr: "127.0.0.1:8999"
   sdsAddr: "127.0.0.1:8998"
   caCert: "./conf/certs/ca.pem"

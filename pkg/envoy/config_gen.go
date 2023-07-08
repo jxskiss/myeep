@@ -61,11 +61,20 @@ func (p *ConfigGenerator) genBootstrapConfig() error {
 	parser := &YAMLParser{
 		cfg: p.cfg,
 	}
-	yamlData := parser.parseYAML(bootstrapTpl, p.cfg)
-	yamlData = parser.solveCommands(yamlData)
+
+	header := "# This file is auto generated, do not edit.\n\n"
+
+	yamlData, err := parser.parseYAML(bootstrapTpl, p.cfg)
+	if err != nil {
+		return errors.WithMessage(err, "parse bootstrap yaml")
+	}
+	yamlData, err = parser.solveCommands("bootstrap", yamlData)
+	if err != nil {
+		return errors.WithMessage(err, "solve commands in bootstrap yaml")
+	}
 
 	outFile := p.BootstrapConfigFile()
-	return p.writeYaml(outFile, yamlData, "")
+	return p.writeYaml(outFile, yamlData, header)
 }
 
 func (p *ConfigGenerator) genListenersConfig() error {
@@ -78,14 +87,28 @@ func (p *ConfigGenerator) genListenersConfig() error {
 	tmplFile := filepath.Join(p.cfg.confDir, "listeners.yaml")
 	yamlText, err := os.ReadFile(tmplFile)
 	if err != nil {
-		return errors.AddStack(err)
+		return errors.WithMessage(err, "read listeners.yaml")
 	}
-	yamlData := parser.parseYAML(string(yamlText), p.cfg)
-	yamlData = parser.solveCommands(yamlData)
+	yamlData, err := parser.parseYAML(string(yamlText), p.cfg)
+	if err != nil {
+		return errors.WithMessage(err, "parse listeners.yaml")
+	}
+	yamlData, err = parser.solveCommands("listeners", yamlData)
+	if err != nil {
+		return errors.WithMessage(err, "solve commands in listeners.yaml")
+	}
 
 	outFile := filepath.Join(p.cfg.OutputPath(), "listeners.yaml")
 	return p.writeYaml(outFile, yamlData, header)
 }
+
+var simpleSSLClusterTpl = []byte(`
+# simplessl
+- "!@@ simple_cluster":
+    name: "{{ .SimpleSSL.ClusterName }}"
+    endpoints:
+      - "{{ .SimpleSSL.HTTPAddr }}"
+`)
 
 func (p *ConfigGenerator) genClustersConfig() error {
 	parser := &YAMLParser{
@@ -97,10 +120,21 @@ func (p *ConfigGenerator) genClustersConfig() error {
 	tmplFile := filepath.Join(p.cfg.confDir, "clusters.yaml")
 	yamlText, err := os.ReadFile(tmplFile)
 	if err != nil {
-		return errors.AddStack(err)
+		return errors.WithMessage(err, "read clusters.yaml")
 	}
-	yamlData := parser.parseYAML(string(yamlText), p.cfg)
-	yamlData = parser.solveCommands(yamlData)
+
+	if p.cfg.SimpleSSL.Enable {
+		yamlText = append(simpleSSLClusterTpl, yamlText...)
+	}
+
+	yamlData, err := parser.parseYAML(string(yamlText), p.cfg)
+	if err != nil {
+		return errors.WithMessage(err, "parse clusters.yaml")
+	}
+	yamlData, err = parser.solveCommands("clusters", yamlData)
+	if err != nil {
+		return errors.WithMessage(err, "solve commands in clusters.yaml")
+	}
 
 	outFile := filepath.Join(p.cfg.OutputPath(), "clusters.yaml")
 	return p.writeYaml(outFile, yamlData, header)
@@ -114,12 +148,12 @@ func (p *ConfigGenerator) writeYaml(file string, data any, header string) error 
 	enc.SetIndent(2)
 	err := enc.Encode(data)
 	if err != nil {
-		return errors.AddStack(err)
+		return errors.WithMessagef(err, "encoding yaml file %s", file)
 	}
 
 	err = easy.WriteFile(file, buf.Bytes(), 0644)
 	if err != nil {
-		return errors.AddStack(err)
+		return errors.WithMessagef(err, "writing yaml file %s", file)
 	}
 	return nil
 }

@@ -13,16 +13,19 @@ type Configuration struct {
 	NodeCluster string `yaml:"nodeCluster" env:"ENVOY_NODE_CLUSTER" default:"infra.myeep.default"`
 	NodeId      string `yaml:"nodeId" env:"ENVOY_NODE_ID"`
 	AdminPort   int    `yaml:"adminPort" env:"ENVOY_ADMIN_PORT" default:"9000"`
-	LogLevel    string `yaml:"logLevel" flag:"level" default:"info"`
+	LogLevel    string `yaml:"logLevel" flag:"log-level" default:"info"`
 
-	SSLCertServer struct {
-		Enable     bool   `yaml:"enable"`
-		HTTPAddr   string `yaml:"httpAddr"`
-		SDSAddr    string `yaml:"sdsAddr"`
-		CACert     string `yaml:"caCert"`
-		ClientCert string `yaml:"clientCert"`
-		ClientKey  string `yaml:"clientKey"`
-	} `yaml:"sslCertServer"`
+	PassThroughFlags []string `yaml:"passThroughFlags"`
+
+	SimpleSSL struct {
+		Enable      bool   `yaml:"enable"`
+		ClusterName string `yaml:"clusterName"`
+		HTTPAddr    string `yaml:"httpAddr"`
+		SDSAddr     string `yaml:"sdsAddr"`
+		CACert      string `yaml:"caCert"`
+		ClientCert  string `yaml:"clientCert"`
+		ClientKey   string `yaml:"clientKey"`
+	} `yaml:"simpleSSL"`
 
 	confDir string
 }
