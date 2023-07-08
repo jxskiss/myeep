@@ -95,8 +95,11 @@ func (p *YAMLParser) cmdAddress(arg any) (any, error) {
 }
 
 func (p *YAMLParser) cmdSDSCluster(arg any) (any, error) {
+	if !p.cfg.SimpleSSL.Enable {
+		return nil, nil
+	}
+
 	tmpl := `
-{{- if .SimpleSSL.Enable }}
 name: sds_server_mtls
 typed_extension_protocol_options:
   envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
@@ -122,7 +125,6 @@ transport_socket:
             filename: "{{ .SimpleSSL.ClientCert }}"
           private_key:
             filename: "{{ .SimpleSSL.ClientKey }}"
-{{- end }}
 `
 	return p.parseYAML(tmpl, p.cfg)
 }

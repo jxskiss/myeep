@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,19 +23,17 @@ func main() {
 
 	app := mcli.NewApp()
 	app.Add("envoy run", runEnvoyServer, "Run envoy server")
+	app.Add("envoy hot-restarter", runHotRestarter, "(WIP) Run envoy hot-restarter")
 	app.Add("envoy generate-config", generateEnvoyConfig, "Generate envoy config files")
 	app.Add("envoy dump", dumpEnvoyConfig, "Dump envoy configuration from admin interface")
 	app.Run()
 }
 
-// TODO: envoy hot-restart
-//       https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/hot_restart
-//       https://www.envoyproxy.io/docs/envoy/latest/operations/hot_restarter
-
 func runEnvoyServer(ctx *mcli.Context) {
 	var args struct {
-		ConfDir  string `cli:"-c, --conf-dir, configuration directory" default:"./conf"`
-		LogLevel string `cli:"-l, --log-level, set envoy log-level"`
+		ConfDir      string `cli:"-c, --conf-dir, configuration directory" default:"./conf"`
+		LogLevel     string `cli:"-l, --log-level, set envoy log-level"`
+		RestartEpoch int    `cli:"    --restart-epoch, hot restart epoch, pass through to Envoy"`
 	}
 	ctx.Parse(&args)
 	cfg, err := envoy.ReadConfig(args.ConfDir)
@@ -45,16 +44,35 @@ func runEnvoyServer(ctx *mcli.Context) {
 		cfg.LogLevel = args.LogLevel
 	}
 
-	exit, err := envoy.Run(cfg)
+	exit, err := envoy.Run(cfg, args.RestartEpoch)
 	if err != nil {
 		zlog.Fatalf("failed run envoy: %v", err)
 	}
 	<-exit
 }
 
+func runHotRestarter(ctx *mcli.Context) {
+	var args struct {
+		ConfDir string `cli:"-c, --conf-dir, configuration directory" default:"./conf"`
+	}
+	ctx.Parse(&args)
+
+	binPath, err := os.Executable()
+	if err != nil {
+		zlog.Fatalf("failed get executable path: %v", err)
+	}
+	zlog.Infof("binPath: %v, os.Args: %v", binPath, easy.JSON(os.Args))
+
+	hr := newHotRestarter(&hrArgs{
+		ConfDir: args.ConfDir,
+		BinPath: binPath,
+	})
+	hr.Run()
+}
+
 func generateEnvoyConfig(ctx *mcli.Context) {
-	var args struct{
-		ConfDir  string `cli:"-c, --conf-dir, configuration directory" default:"./conf"`
+	var args struct {
+		ConfDir string `cli:"-c, --conf-dir, configuration directory" default:"./conf"`
 
 		// TODO: backup
 	}
@@ -63,6 +81,7 @@ func generateEnvoyConfig(ctx *mcli.Context) {
 	if err != nil {
 		zlog.Fatalf("failed read config: %v", err)
 	}
+
 	gen := envoy.NewConfigGenerator(cfg)
 	err = gen.Generate()
 	if err != nil {

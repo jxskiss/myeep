@@ -13,7 +13,10 @@ type Configuration struct {
 	NodeCluster string `yaml:"nodeCluster" env:"ENVOY_NODE_CLUSTER" default:"infra.myeep.default"`
 	NodeId      string `yaml:"nodeId" env:"ENVOY_NODE_ID"`
 	AdminPort   int    `yaml:"adminPort" env:"ENVOY_ADMIN_PORT" default:"9000"`
-	LogLevel    string `yaml:"logLevel" flag:"log-level" default:"info"`
+	LogLevel    string `yaml:"logLevel" env:"ENVOY_LOG_LEVEL" flag:"log-level" default:"info"`
+
+	MaxOpenFilesNum      uint64 `yaml:"maxOpenFilesNum" env:"ENVOY_MAX_OPEN_FILES" default:"102400"`
+	MaxInotifyWatchesNum uint64 `yaml:"maxInotifyWatchesNum" env:"ENVOY_MAX_INOTIFY_WATCHES" default:"524288"`
 
 	PassThroughFlags []string `yaml:"passThroughFlags"`
 
@@ -35,7 +38,7 @@ func ReadConfig(confDir string) (*Configuration, error) {
 	cfg := &Configuration{}
 	err := confr.New(&confr.Config{}).Load(cfg, confFile)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed read configuration")
+		return nil, errors.WithMessage(err, "read envoy configuration")
 	}
 	cfg.confDir = confDir
 	zlog.Infof("envoy configuration: %v", easy.JSON(cfg))

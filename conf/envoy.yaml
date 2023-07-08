@@ -3,6 +3,17 @@ nodeId: "example"
 adminPort: 9000
 logLevel: info
 
+# ulimit -n {{ pillar.get('envoy_max_open_files', '102400') }}
+maxOpenFilesNum: 102400
+
+# sysctl fs.inotify.max_user_watches={{ pillar.get('envoy_max_inotify_watches', '524288') }}
+#
+# Note on inotify.max_user_watches:
+# If Envoy is being configured to watch many files for configuration in a directory
+# on a Linux machine, increase this value as Linux enforces limits on
+# the maximum number of files that can be watched.
+maxInotifyWatchesNum: 524288
+
 simpleSSL:
   enable: true
   clusterName: "simplessl"

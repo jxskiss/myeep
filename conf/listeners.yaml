@@ -23,6 +23,7 @@
                 - name: demo_unix_ping_pong
                   domains:
                     - "test.example.com"
+                    - "localhost"
                   routes:
                     - match:
                         path: "/ping"
@@ -59,7 +60,7 @@
             route_config:
               name: test.example.com
               virtual_hosts:
-                - name: text.example.com
+                - name: test.example.com
                   domains:
                     - "test.example.com"
                   routes:
